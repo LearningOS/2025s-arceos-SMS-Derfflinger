@@ -7,6 +7,7 @@ use axerrno::{ax_err, AxError, AxResult};
 use axfs_vfs::{VfsNodeAttr, VfsNodeOps, VfsNodeRef, VfsNodeType, VfsOps, VfsResult};
 use axsync::Mutex;
 use lazyinit::LazyInit;
+use crate::alloc::string::ToString;
 
 use crate::{api::FileType, fs, mounts};
 
@@ -133,11 +134,19 @@ impl VfsNodeOps for RootDirectory {
     }
 
     fn rename(&self, src_path: &str, dst_path: &str) -> VfsResult {
-        self.lookup_mounted_fs(src_path, |fs, rest_path| {
+        let src_path = self.lookup_mounted_fs(src_path, |fs, rest_path| {
+            if rest_path.is_empty() {
+                return ax_err!(PermissionDenied); // cannot rename mount points
+            } else {
+                Ok(rest_path.to_string())
+            }
+        });
+
+        self.lookup_mounted_fs(dst_path, |fs, rest_path| {
             if rest_path.is_empty() {
                 ax_err!(PermissionDenied) // cannot rename mount points
             } else {
-                fs.root_dir().rename(rest_path, dst_path)
+                fs.root_dir().rename(src_path.unwrap().as_str(), rest_path)
             }
         })
     }

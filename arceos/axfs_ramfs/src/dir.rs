@@ -67,6 +67,21 @@ impl DirNode {
         children.remove(name);
         Ok(())
     }
+
+    /// Rename a node by the given old name and new name in this directory.
+    pub fn rename_node(&self, old_name: &str, new_name: &str) -> VfsResult {
+        let mut children = self.children.write();
+        let node = children.get(old_name).ok_or(VfsError::NotFound)?.clone();
+        if let Some(dir) = node.as_any().downcast_ref::<DirNode>() {
+            if !dir.children.read().is_empty() {
+                return Err(VfsError::DirectoryNotEmpty);
+            }
+        }
+
+        children.insert(new_name.into(), node);
+        children.remove(old_name);
+        Ok(())
+    }
 }
 
 impl VfsNodeOps for DirNode {
@@ -162,6 +177,36 @@ impl VfsNodeOps for DirNode {
             Err(VfsError::InvalidInput) // remove '.' or '..
         } else {
             self.remove_node(name)
+        }
+    }
+
+    fn rename(&self, src_path: &str, dst_path: &str) -> VfsResult {
+        log::debug!("rename at ramfs: {}, new name: {}", src_path, dst_path);
+        log::debug!("{:?}", self.get_entries());
+
+        let (name, rest) = split_path(src_path);
+        let (new_name, new_rest) = split_path(dst_path);
+
+        if rest.is_some() && new_rest.is_some() {
+            let rest = rest.unwrap();
+            let new_rest = new_rest.unwrap();
+            match (name, new_name) {
+                ("", "") | (".", ".") => self.rename(rest, new_rest),
+                ("..", _) | (_, "..") => return Err(VfsError::InvalidInput),
+                _ => {
+                    let subdir = self
+                        .children
+                        .read()
+                        .get(name)
+                        .ok_or(VfsError::NotFound)?
+                        .clone();
+                    subdir.rename(rest, new_rest)
+                }
+            }
+        } else if name.is_empty() || name == "." || name == ".." || new_name.is_empty() || new_name == "." || new_name == ".." {
+            Err(VfsError::InvalidInput) // remove '.' or '..
+        } else {
+            self.rename_node(name, new_name)
         }
     }
 

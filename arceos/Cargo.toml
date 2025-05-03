@@ -93,5 +93,6 @@ elf = { path = "modules/elf" }
 
 [patch.crates-io]
 kernel_guard = { path = "../crates/kernel_guard"} 
+axfs_ramfs = { path = "./axfs_ramfs" }
 [profile.release]
 lto = true
