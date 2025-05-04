@@ -7,7 +7,9 @@ use axerrno::LinuxError;
 use axtask::current;
 use axtask::TaskExtRef;
 use axhal::paging::MappingFlags;
-use arceos_posix_api as api;
+use arceos_posix_api::{self as api, get_file_like};
+use axhal::mem::{PAGE_SIZE_4K, phys_to_virt, VirtAddr, MemoryAddr};
+use memory_addr::VirtAddrRange;
 
 const SYS_IOCTL: usize = 29;
 const SYS_OPENAT: usize = 56;
@@ -140,7 +142,42 @@ fn sys_mmap(
     fd: i32,
     _offset: isize,
 ) -> isize {
-    unimplemented!("no sys_mmap!");
+    info!("sys_map parameter: addr: {:?}; length: {}; prot: {}; flags: {}; fd: {}; _offset: {}", addr, length, prot, flags, fd, _offset);
+    let curr = current();
+    let mut uspace = curr.task_ext().aspace.lock();
+
+    let vaddr = match uspace.find_free_area(
+        VirtAddr::from(addr as usize), 
+        length.align_up_4k(),
+        VirtAddrRange::from_start_size(uspace.base(), uspace.size()),
+    ) {
+        Some(_vaddr) => _vaddr,
+        None => return 0,
+    };
+
+    let flags = MmapProt::from_bits_truncate(prot);
+    uspace.map_alloc(vaddr, length.align_up_4k(), flags.into(), true).unwrap();
+    let (paddr, _, _) = uspace
+        .page_table()
+        .query(vaddr)
+        .unwrap_or_else(|_| panic!("Mapping failed for segment: {:#x}", vaddr));
+
+    let file = match get_file_like(fd) {
+        Ok(file) => file,
+        Err(_) => return 0,
+    };
+    let mut buf = alloc::vec![0; length];
+    file.read(&mut buf).unwrap();
+
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            buf.as_ptr(),
+            phys_to_virt(paddr).as_mut_ptr(),
+            PAGE_SIZE_4K,
+        );
+    }
+
+    vaddr.as_usize() as isize
 }
 
 fn sys_openat(dfd: c_int, fname: *const c_char, flags: c_int, mode: api::ctypes::mode_t) -> isize {
