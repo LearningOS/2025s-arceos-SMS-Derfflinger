@@ -77,6 +77,7 @@ fn vmexit_handler(ctx: &VmCpuRegisters) {
     use scause::{Exception, Trap};
 
     let scause = scause::read();
+    ax_println!("vmexit: cause = {:?}, sepc = {:#x}", scause.cause(), ctx.guest_regs.sepc);
     match scause.cause() {
         Trap::Exception(Exception::VirtualSupervisorEnvCall) => {
             let sbi_msg = SbiMessage::from_regs(ctx.guest_regs.gprs.a_regs()).ok();
